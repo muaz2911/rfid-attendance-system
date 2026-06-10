@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFID Attendance System</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            padding: 20px;
+        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .header p { opacity: 0.9; font-size: 1.1em; }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+        .status-badge.connected { background: #10b981; }
+        .status-badge.error { background: #ef4444; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card .icon { font-size: 2.5em; margin-bottom: 15px; }
+        .stat-card .icon.green { color: #10b981; }
+        .stat-card .icon.red { color: #ef4444; }
+        .stat-card .icon.blue { color: #3b82f6; }
+        .stat-card .icon.orange { color: #f59e0b; }
+        .stat-card h3 { font-size: 2em; margin-bottom: 5px; }
+        .stat-card p { color: #6b7280; font-size: 0.95em; }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f3f4f6;
+        }
+        .panel-header h2 { font-size: 1.3em; color: #374151; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-secondary { background: #6b7280; color: white; }
+        .btn-secondary:hover { background: #4b5563; }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-warning:hover { background: #d97706; }
+
+        .table-container { overflow-x: auto; max-height: 400px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; color: #374151; text-transform: uppercase; font-size: 0.8em; letter-spacing: 0.5px; position: sticky; top: 0; }
+        tr:hover { background: #f9fafb; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 0.8em; font-weight: 500; }
+        .badge-present { background: #d1fae5; color: #065f46; }
+        .badge-absent { background: #fee2e2; color: #991b1b; }
+        .badge-active { background: #d1fae5; color: #065f46; }
+        .badge-inactive { background: #fee2e2; color: #991b1b; }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideIn 0.3s;
+        }
+        @keyframes slideIn { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { font-size: 1.5em; }
+        .close-btn { background: none; border: none; font-size: 1.5em; cursor: pointer; color: #6b7280; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: #374151; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #3b82f6; }
+        .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px; }
+
+        .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 2000; }
+        .toast { padding: 15px 20px; border-radius: 10px; color: white; margin-bottom: 10px; animation: slideInRight 0.3s; display: flex; align-items: center; gap: 10px; }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+        .toast.info { background: #3b82f6; }
+        .toast.warning { background: #f59e0b; }
+        @keyframes slideInRight { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f4f6; border-top: 3px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-state { text-align: center; padding: 40px; color: #9ca3af; }
+        .empty-state i { font-size: 3em; margin-bottom: 15px; }
+        .date-filter { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
+        .date-filter input { padding: 8px 12px; border: 2px solid #e5e7eb; border-radius: 8px; }
+
+        .action-buttons { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .clock-display {
+            background: #1e293b;
+            color: #10b981;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.2em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            background: #d1fae5;
+            color: #065f46;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .live-indicator::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .new-record {
+            animation: highlightNew 2s ease-out;
+        }
+        @keyframes highlightNew {
+            0% { background: #fef3c7 !important; }
+            100% { background: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-id-card"></i> RFID Attendance System</h1>
+            <p>Smart attendance tracking with Firebase</p>
+            <div class="status-badge connected" id="connectionStatus">
+                <i class="fas fa-check-circle"></i> Connected to Firebase
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="icon green"><i class="fas fa-check-circle"></i></div>
+                <h3 id="presentCount">0</h3>
+                <p>Present Today</p>
+            </div>
+            <div class="stat-card">
+                <div class="icon red"><i class="fas fa-times-circle"></i></div>
+                <h3 id="absentCount">0</h3>
+                <p>Absent Today</p>
+            </div>
+            <div class="stat-card">
+                <div class="icon blue"><i class="fas fa-users"></i></div>
+                <h3 id="totalStudents">0</h3>
+                <p>Total Students</p>
+            </div>
+            <div class="stat-card">
+                <div class="icon orange"><i class="fas fa-clock"></i></div>
+                <h3 id="lastUpdate">--:--</h3>
+                <p>Last Update</p>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <h2><i class="fas fa-clipboard-list"></i> Live Attendance</h2>
+                        <span class="live-indicator" style="margin-top:8px;">LIVE</span>
+                    </div>
+                    <div class="date-filter">
+                        <input type="date" id="attendanceDate" value="">
+                        <button class="btn btn-secondary" onclick="loadAttendance()">
+                            <i class="fas fa-sync"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="clock-display" id="liveClock">00:00:00</div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-warning" onclick="markAbsent()">
+                        <i class="fas fa-user-times"></i> Mark Absent (Real-time)
+                    </button>
+                    <button class="btn btn-danger" onclick="clearAttendance()">
+                        <i class="fas fa-trash"></i> Clear Today
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Time</th><th>Name</th><th>Class</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="attendanceTable">
+                            <tr><td colspan="4" class="empty-state"><i class="fas fa-inbox"></i><p>No attendance records</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h2><i class="fas fa-user-graduate"></i> Students</h2>
+                    <button class="btn btn-primary" onclick="openModal()">
+                        <i class="fas fa-plus"></i> Add Student
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>UID</th><th>Name</th><th>Class</th><th>Status</th><th>Action</th></tr>
+                        </thead>
+                        <tbody id="studentsTable">
+                            <tr><td colspan="5" class="empty-state"><i class="fas fa-inbox"></i><p>No students found</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Student Modal -->
+    <div class="modal-overlay" id="studentModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add New Student</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="studentForm" onsubmit="saveStudent(event)">
+                <div class="form-group">
+                    <label>RFID UID *</label>
+                    <input type="text" id="studentUid" required placeholder="Contoh: 04A41107" maxlength="8" style="text-transform:uppercase;">
+                    <small style="color:#6b7280;">8 karakter hexadecimal (0-9, A-F)</small>
+                </div>
+                <div class="form-group">
+                    <label>Full Name *</label>
+                    <input type="text" id="studentName" required placeholder="Enter student name">
+                </div>
+                <div class="form-group">
+                    <label>Class</label>
+                    <select id="studentClass">
+                        <option value="1A">1A</option>
+                        <option value="1B">1B</option>
+                        <option value="2A">2A</option>
+                        <option value="2B">2B</option>
+                        <option value="3A">3A</option>
+                        <option value="3B">3B</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="studentStatus">
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> Save Student</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // ==================== FIREBASE CONFIG ====================
+        const firebaseConfig = {
+            apiKey: "AIzaSyCBHeqsh_YeIfzZWQ7tq8Vl8V8yWKLMJMo",
+            authDomain: "rfid-attendance-93035.firebaseapp.com",
+            databaseURL: "https://rfid-attendance-93035-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "rfid-attendance-93035",
+            storageBucket: "rfid-attendance-93035.firebasestorage.app",
+            messagingSenderId: "242809897490",
+            appId: "1:242809897490:web:196acabcf73dc6af184ecb",
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let students = [];
+        let attendance = [];
+        let editingStudent = null;
+        let lastAttendanceCount = 0;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('attendanceDate').value = new Date().toISOString().split('T')[0];
+
+            // Live clock
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            // Real-time listener for students (UID as key)
+            db.ref('students').on('value', (snapshot) => {
+                const data = snapshot.val() || {};
+                students = Object.entries(data).map(([key, val]) => ({
+                    ...val,
+                    firebaseKey: key,
+                    uid: key  // UID adalah key!
+                }));
+                renderStudents();
+                updateStats();
+                updateConnectionStatus(true);
+            }, (error) => {
+                updateConnectionStatus(false);
+                showToast('Firebase error: ' + error.message, 'error');
+            });
+
+            // Real-time listener for attendance
+            db.ref('attendance').on('value', (snapshot) => {
+                const data = snapshot.val() || {};
+                const newAttendance = Object.entries(data).map(([key, val]) => ({...val, firebaseKey: key}));
+
+                // Check for new records
+                if (newAttendance.length > lastAttendanceCount) {
+                    const latestRecord = newAttendance[newAttendance.length - 1];
+                    if (latestRecord.date === document.getElementById('attendanceDate').value) {
+                        showToast(`New scan: ${latestRecord.name || 'Unknown'} at ${latestRecord.time}`, 'info');
+                    }
+                }
+
+                attendance = newAttendance;
+                lastAttendanceCount = attendance.length;
+                renderAttendance();
+                updateStats();
+            });
+        });
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+            document.getElementById('liveClock').textContent = timeStr;
+        }
+
+        // ==================== RENDER FUNCTIONS ====================
+        function renderStudents() {
+            const tbody = document.getElementById('studentsTable');
+            if (students.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><i class="fas fa-inbox"></i><p>No students found</p></td></tr>`;
+                return;
+            }
+            tbody.innerHTML = students.map(s => `
+                <tr>
+                    <td><code style="background:#f3f4f6; padding:2px 6px; border-radius:4px; font-family:monospace; font-size:0.85em;">${s.uid}</code></td>
+                    <td>${s.name}</td>
+                    <td>${s.class}</td>
+                    <td><span class="badge badge-${s.status === 'Active' ? 'active' : 'inactive'}">${s.status}</span></td>
+                    <td>
+                        <button class="btn btn-primary" onclick="editStudent('${s.uid}')" style="padding: 5px 10px; font-size: 0.8em;"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-danger" onclick="deleteStudent('${s.uid}')" style="padding: 5px 10px; font-size: 0.8em;"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderAttendance() {
+            const tbody = document.getElementById('attendanceTable');
+            const date = document.getElementById('attendanceDate').value;
+
+            // Filter by date, sort by time descending (newest first)
+            const filtered = attendance
+                .filter(a => a.date === date)
+                .sort((a, b) => {
+                    const timeA = a.time || '00:00:00';
+                    const timeB = b.time || '00:00:00';
+                    return timeB.localeCompare(timeA);
+                });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="empty-state"><i class="fas fa-inbox"></i><p>No attendance records for ${date}</p></td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map((a, index) => {
+                const isNewest = index === 0;
+                const rowClass = isNewest ? 'new-record' : '';
+                const nameDisplay = a.name === 'Unknown' 
+                    ? `<span style="color:#ef4444; font-weight:600;"><i class="fas fa-exclamation-circle"></i> ${a.name}</span>`
+                    : a.name;
+
+                return `
+                    <tr class="${rowClass}">
+                        <td><strong>${a.time || '--:--'}</strong></td>
+                        <td>${nameDisplay}</td>
+                        <td>${a.class || '-'}</td>
+                        <td><span class="badge badge-${a.status === 'Present' ? 'present' : 'absent'}">${a.status}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateStats() {
+            const today = document.getElementById('attendanceDate').value;
+            const todayAttendance = attendance.filter(a => a.date === today);
+            document.getElementById('presentCount').textContent = todayAttendance.filter(a => a.status === 'Present').length;
+            document.getElementById('absentCount').textContent = todayAttendance.filter(a => a.status === 'Absent').length;
+            document.getElementById('totalStudents').textContent = students.length;
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        // ==================== MARK ABSENT (REAL-TIME) ====================
+        function markAbsent() {
+            const today = document.getElementById('attendanceDate').value;
+            const now = new Date();
+            const currentTime = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            if (!confirm(`Mark absent students for ${today} at ${currentTime}?`)) return;
+
+            const todayAttendance = attendance.filter(a => a.date === today);
+            const presentUIDs = new Set();
+            todayAttendance.forEach(a => {
+                if (a.status === 'Present') presentUIDs.add(a.uid);
+            });
+
+            let absentCount = 0;
+            const promises = [];
+
+            students.forEach(student => {
+                if (student.status === 'Active' && !presentUIDs.has(student.uid)) {
+                    promises.push(
+                        db.ref('attendance').push({
+                            uid: student.uid,
+                            name: student.name,
+                            class: student.class,
+                            date: today,
+                            time: currentTime,
+                            status: 'Absent'
+                        })
+                    );
+                    absentCount++;
+                }
+            });
+
+            Promise.all(promises)
+                .then(() => {
+                    showToast(`${absentCount} students marked absent at ${currentTime}!`, 'success');
+                })
+                .catch(error => {
+                    showToast('Error: ' + error.message, 'error');
+                });
+        }
+
+        function clearAttendance() {
+            const today = document.getElementById('attendanceDate').value;
+            if (!confirm(`Clear all attendance records for ${today}?`)) return;
+
+            const todayRecords = attendance.filter(a => a.date === today);
+            const promises = todayRecords.map(r => db.ref('attendance/' + r.firebaseKey).remove());
+
+            Promise.all(promises)
+                .then(() => {
+                    showToast('Attendance cleared!', 'success');
+                })
+                .catch(error => {
+                    showToast('Error: ' + error.message, 'error');
+                });
+        }
+
+        // ==================== STUDENT CRUD (FIXED - UID AS KEY) ====================
+        function openModal() {
+            editingStudent = null;
+            document.getElementById('modalTitle').textContent = 'Add New Student';
+            document.getElementById('studentForm').reset();
+            document.getElementById('studentUid').disabled = false;
+            document.getElementById('studentModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('studentModal').classList.remove('active');
+            editingStudent = null;
+        }
+
+        function editStudent(uid) {
+            const student = students.find(s => s.uid === uid);
+            if (!student) return;
+            editingStudent = student;
+            document.getElementById('modalTitle').textContent = 'Edit Student';
+            document.getElementById('studentName').value = student.name;
+            document.getElementById('studentUid').value = student.uid;
+            document.getElementById('studentUid').disabled = true; // Cannot change UID
+            document.getElementById('studentClass').value = student.class;
+            document.getElementById('studentStatus').value = student.status;
+            document.getElementById('studentModal').classList.add('active');
+        }
+
+        async function saveStudent(event) {
+            event.preventDefault();
+
+            const uid = document.getElementById('studentUid').value.trim().toUpperCase();
+            const name = document.getElementById('studentName').value.trim();
+            const kelas = document.getElementById('studentClass').value;
+            const status = document.getElementById('studentStatus').value;
+
+            if (!uid || !name) {
+                showToast('UID dan Name wajib diisi!', 'error');
+                return;
+            }
+
+            // Validate UID format (8 hex chars)
+            if (!/^[0-9A-F]{8}$/i.test(uid)) {
+                showToast('UID mesti 8 karakter hex (0-9, A-F)', 'warning');
+                return;
+            }
+
+            const studentData = {
+                uid: uid,
+                name: name,
+                class: kelas,
+                status: status,
+                created: new Date().toISOString().split('T')[0]
+            };
+
+            try {
+                if (editingStudent) {
+                    // Update existing (UID cannot change)
+                    await db.ref('students/' + uid).update(studentData);
+                    showToast('Student updated!', 'success');
+                } else {
+                    // Check if UID already exists
+                    const snapshot = await db.ref('students/' + uid).once('value');
+                    if (snapshot.exists()) {
+                        showToast('Error: UID ' + uid + ' sudah wujud!', 'error');
+                        return;
+                    }
+                    // Simpan dengan UID sebagai key! (set bukan push)
+                    await db.ref('students/' + uid).set(studentData);
+                    showToast('Student ' + name + ' berjaya ditambah!', 'success');
+                }
+                closeModal();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteStudent(uid) {
+            if (!confirm('Padam pelajar ' + uid + '?')) return;
+            try {
+                await db.ref('students/' + uid).remove();
+                showToast('Pelajar dipadam!', 'success');
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
+        }
+
+        function loadAttendance() {
+            renderAttendance();
+        }
+
+        // ==================== UTILS ====================
+        function updateConnectionStatus(connected) {
+            const badge = document.getElementById('connectionStatus');
+            if (connected) {
+                badge.className = 'status-badge connected';
+                badge.innerHTML = '<i class="fas fa-check-circle"></i> Connected to Firebase';
+            } else {
+                badge.className = 'status-badge error';
+                badge.innerHTML = '<i class="fas fa-exclamation-circle"></i> Connection Error';
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle';
+            toast.innerHTML = `<i class="fas fa-${icon}"></i> ${message}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        document.getElementById('studentModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeModal();
+        });
+    </script>
+</body>
+</html>
